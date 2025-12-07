@@ -2,7 +2,7 @@
 
 Explore what languages people are learning on Duolingo around the world: https://anvaka.github.io/duolingo-study-map/
 
-![Duolingo Language Map Screenshot](public/screenshot.png)
+[![Duolingo Language Map Screenshot](public/screenshot.png)](https://anvaka.github.io/duolingo-study-map/)
 
 Each country displays a flag representing the most studied language. For example, if people
 in Brazil are learning English, you'll see the British flag over Brazil.
