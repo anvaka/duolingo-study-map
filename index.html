@@ -66,10 +66,27 @@
     .control-row:last-child {
       margin-bottom: 0;
     }
-    #year-value {
-      display: inline-block;
-      min-width: 40px;
-      font-weight: 600;
+    .year-buttons {
+      display: inline-flex;
+      gap: 4px;
+    }
+    .year-btn {
+      padding: 4px 8px;
+      border: 1px solid #ccc;
+      background: #fff;
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 12px;
+      font-weight: 500;
+      transition: all 0.15s ease;
+    }
+    .year-btn:hover {
+      background: #f0f0f0;
+    }
+    .year-btn.active {
+      background: #58cc02;
+      border-color: #58cc02;
+      color: #fff;
     }
     .about-toggle {
       background: none;
@@ -138,8 +155,9 @@
         align-items: center;
         gap: 4px;
       }
-      #controls input[type="range"] {
-        width: 100px;
+      .year-btn {
+        padding: 3px 6px;
+        font-size: 11px;
       }
       .about-toggle {
         display: inline;
@@ -172,10 +190,15 @@
   <div id="controls">
     <h3>Duolingo Language Study</h3>
     <div class="control-row">
-      <label>
-        Year: <span id="year-value">2025</span>
-        <input type="range" id="year-slider" min="2020" max="2025" value="2025" step="1">
-      </label>
+      <label>Year:</label>
+      <div class="year-buttons" id="year-buttons">
+        <button class="year-btn" data-year="2020">2020</button>
+        <button class="year-btn" data-year="2021">2021</button>
+        <button class="year-btn" data-year="2022">2022</button>
+        <button class="year-btn" data-year="2023">2023</button>
+        <button class="year-btn" data-year="2024">2024</button>
+        <button class="year-btn active" data-year="2025">2025</button>
+      </div>
     </div>
     <div class="control-row">
       <label>

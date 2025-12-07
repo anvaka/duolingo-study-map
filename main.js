@@ -1,4 +1,4 @@
-import getImage from './imageLayer.js';
+import { getImageSync, preloadImages } from './imageLayer.js';
 import { getFlagUrl } from './languageToFlag.js';
 
 // Map GeoJSON country names to CSV country names
@@ -42,8 +42,10 @@ const geoJsonToCsvName = {
 
 let duoData = new Map();
 let countryLayers = new Map();
+let bordersCache = null;
 let currentYear = getInitialYear();
 let currentRank = getInitialRank();
+let renderGeneration = 0;
 
 function getInitialYear() {
   const params = new URLSearchParams(window.location.search);
@@ -81,6 +83,7 @@ map.touchZoomRotate.disableRotation();
 // Load data and initialize
 Promise.all([loadDuoData(), loadBorders()]).then(([data, borders]) => {
   duoData = data;
+  bordersCache = borders;
   initMap(borders);
   setupControls();
 });
@@ -101,7 +104,6 @@ function parseCsv(text) {
     const country = values[0];
     const record = {};
 
-    // Parse columns: pop1_2020, pop2_2020, pop1_2021, ...
     for (let j = 1; j < header.length; j++) {
       const col = header[j];
       const match = col.match(/pop(\d)_(\d{4})/);
@@ -140,8 +142,8 @@ function initMap(borders) {
     paint: { 'line-color': '#ffffff', 'line-width': 1 },
   });
 
-  // Load all countries with current settings
-  renderAllCountries(borders);
+  // Start progressive rendering of flags
+  renderAllCountriesProgressive(borders);
 
   // Tooltip on hover
   const tooltip = document.getElementById('tooltip');
@@ -165,10 +167,7 @@ function getCountryName(feature) {
 }
 
 function getLanguageForCountry(countryName) {
-  // Map GeoJSON name to CSV name if needed
   const csvName = geoJsonToCsvName[countryName] || countryName;
-  
-  // Try exact match first, then common variations
   const record = duoData.get(csvName) || 
                  duoData.get(csvName.replace(/ /g, '-')) ||
                  duoData.get(csvName.replace(/-/g, ' '));
@@ -176,21 +175,45 @@ function getLanguageForCountry(countryName) {
   return record[currentYear][currentRank];
 }
 
-async function renderAllCountries(borders) {
-  // Clear existing flag layers
-  for (const [key, _] of countryLayers) {
+// Progressive rendering: preload images, then swap layers atomically
+async function renderAllCountriesProgressive(borders) {
+  const generation = ++renderGeneration;
+  const oldLayers = new Map(countryLayers);
+  const newLayers = new Map();
+
+  // Collect unique flag URLs
+  const flagUrls = new Set();
+  for (const feature of borders.features) {
+    const countryName = getCountryName(feature);
+    const language = getLanguageForCountry(countryName);
+    if (language) {
+      const url = getFlagUrl(language);
+      if (url) flagUrls.add(url);
+    }
+  }
+  
+  // Preload all images in parallel while old layers remain visible
+  await preloadImages([...flagUrls]);
+
+  // Check if a newer render started while we were preloading
+  if (generation !== renderGeneration) return;
+
+  // Add all new layers (with generation-prefixed IDs to avoid conflicts)
+  for (const feature of borders.features) {
+    renderCountry(feature, generation, newLayers);
+  }
+
+  // Remove old layers after new ones are added
+  for (const [key, canvas] of oldLayers) {
     if (map.getLayer(key)) map.removeLayer(key);
     if (map.getSource(key)) map.removeSource(key);
+    if (canvas instanceof HTMLCanvasElement) canvas.remove();
   }
-  countryLayers.clear();
 
-  // Render countries sequentially to avoid overwhelming the browser
-  for (const feature of borders.features) {
-    await renderCountry(feature);
-  }
+  countryLayers = newLayers;
 }
 
-async function renderCountry(countryPolygon) {
+function renderCountry(countryPolygon, generation, newLayers) {
   const countryName = getCountryName(countryPolygon);
   const language = getLanguageForCountry(countryName);
   if (!language) return;
@@ -200,27 +223,32 @@ async function renderCountry(countryPolygon) {
 
   try {
     if (countryPolygon.geometry.type === 'MultiPolygon') {
-      const polygons = countryPolygon.geometry.coordinates.map((coords, i) => ({
-        geometry: { type: 'Polygon', coordinates: coords },
-        properties: countryPolygon.properties,
-      }));
-      await Promise.all(polygons.map((poly, i) => addFlagImage(flagUrl, poly, countryName, i)));
+      countryPolygon.geometry.coordinates.forEach((coords, i) => {
+        addFlagLayer(flagUrl, coords, countryName, i, generation, newLayers);
+      });
     } else if (countryPolygon.geometry.type === 'Polygon') {
-      await addFlagImage(flagUrl, countryPolygon, countryName, 0);
+      addFlagLayer(flagUrl, countryPolygon.geometry.coordinates, countryName, 0, generation, newLayers);
     }
   } catch (err) {
     console.warn(`Failed to render ${countryName}:`, err);
   }
 }
 
-async function addFlagImage(flagUrl, polygon, countryName, polyIndex) {
-  const img = await clipImageToPolygon(flagUrl, polygon.geometry.coordinates[0]);
-  const layerId = `flag-${countryName}-${polyIndex}`;
+function addFlagLayer(flagUrl, coordinates, countryName, polyIndex, generation, newLayers) {
+  const outerRing = coordinates[0];
+  const clipped = clipImageToPolygon(flagUrl, outerRing);
+  const layerId = `flag-${generation}-${countryName}-${polyIndex}`;
 
+  // Add canvas to DOM (required for CanvasSource)
+  clipped.canvas.id = `canvas-${layerId}`;
+  clipped.canvas.style.display = 'none';
+  document.body.appendChild(clipped.canvas);
+  
   map.addSource(layerId, {
-    type: 'image',
-    url: img.canvas.toDataURL(),
-    coordinates: img.coordinates,
+    type: 'canvas',
+    canvas: clipped.canvas.id,
+    coordinates: clipped.coordinates,
+    animate: false,
   });
 
   map.addLayer({
@@ -230,11 +258,12 @@ async function addFlagImage(flagUrl, polygon, countryName, polyIndex) {
     paint: { 'raster-opacity': 0.85 },
   }, 'country-borders');
 
-  countryLayers.set(layerId, true);
+  newLayers.set(layerId, clipped.canvas);
 }
 
-async function clipImageToPolygon(url, coordinates) {
-  const imgData = await getImage(url);
+function clipImageToPolygon(url, coordinates) {
+  const imgData = getImageSync(url);
+  if (!imgData) throw new Error(`Image not preloaded: ${url}`);
 
   // Calculate bounding box
   let minLon = Infinity, minLat = Infinity, maxLon = -Infinity, maxLat = -Infinity;
@@ -245,7 +274,6 @@ async function clipImageToPolygon(url, coordinates) {
     if (lat > maxLat) maxLat = lat;
   }
 
-  // Clamp to valid Mercator range
   const MAX_LAT = 85.0511;
   minLat = Math.max(minLat, -MAX_LAT);
   maxLat = Math.min(maxLat, MAX_LAT);
@@ -253,7 +281,6 @@ async function clipImageToPolygon(url, coordinates) {
   const topLeft = mercator(minLon, maxLat);
   const bottomRight = mercator(maxLon, minLat);
 
-  // Use image dimensions for canvas (like imaginary-faces)
   const canvas = document.createElement('canvas');
   const width = canvas.width = imgData.width;
   const height = canvas.height = imgData.height;
@@ -275,8 +302,6 @@ async function clipImageToPolygon(url, coordinates) {
   }
   ctx.closePath();
   ctx.clip();
-
-  // Draw flag stretched to fill
   ctx.drawImage(imgData.img, 0, 0, width, height);
 
   return {
@@ -294,28 +319,35 @@ function mercator(lon, lat) {
   const R = 6378137;
   const DEG = Math.PI / 180;
   const sin = Math.sin(lat * DEG);
-  const y = R * Math.log((1 + sin) / (1 - sin)) / 2;
-  const x = R * lon * DEG;
-  return { x, y };
+  return {
+    x: R * lon * DEG,
+    y: R * Math.log((1 + sin) / (1 - sin)) / 2,
+  };
 }
 
 function setupControls() {
-  const yearSlider = document.getElementById('year-slider');
-  const yearValue = document.getElementById('year-value');
+  const yearButtons = document.querySelectorAll('.year-btn');
   const rankInputs = document.querySelectorAll('input[name="rank"]');
 
-  // Initialize UI from current state (which may come from query string)
-  yearSlider.value = currentYear;
-  yearValue.textContent = currentYear;
+  yearButtons.forEach(btn => {
+    if (parseInt(btn.dataset.year) === currentYear) {
+      btn.classList.add('active');
+    } else {
+      btn.classList.remove('active');
+    }
+  });
   rankInputs.forEach(input => {
     input.checked = parseInt(input.value) === currentRank;
   });
 
-  yearSlider.addEventListener('input', (e) => {
-    currentYear = parseInt(e.target.value);
-    yearValue.textContent = currentYear;
-    updateQueryString();
-    rerender();
+  yearButtons.forEach(btn => {
+    btn.addEventListener('click', () => {
+      currentYear = parseInt(btn.dataset.year);
+      yearButtons.forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      updateQueryString();
+      rerender();
+    });
   });
 
   rankInputs.forEach(input => {
@@ -328,7 +360,7 @@ function setupControls() {
 }
 
 function rerender() {
-  fetch('./ne_110m_admin_0_countries.geojson')
-    .then(res => res.json())
-    .then(renderAllCountries);
+  if (bordersCache) {
+    renderAllCountriesProgressive(bordersCache);
+  }
 }
