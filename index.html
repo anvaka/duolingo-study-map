@@ -1,0 +1,206 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="Explore what languages people are learning on Duolingo around the world">
+  <title>Duolingo Language Map</title>
+  <link href="https://unpkg.com/maplibre-gl@3.1.0/dist/maplibre-gl.css" rel="stylesheet" />
+  <style>
+    :root {
+      --map-background: #BFCDCF;
+    }
+    *, *::before, *::after {
+      box-sizing: border-box;
+      margin: 0;
+    }
+    body {
+      font-family: Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu,
+        Cantarell, 'Fira Sans', 'Droid Sans', 'Helvetica Neue', sans-serif;
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background-color: var(--map-background);
+      text-rendering: optimizeLegibility;
+      -webkit-font-smoothing: antialiased;
+    }
+    #map {
+      width: 100%;
+      height: 100%;
+    }
+    #controls {
+      position: absolute;
+      top: 10px;
+      left: 10px;
+      background: rgba(255, 255, 255, 0.95);
+      padding: 12px 16px;
+      border-radius: 8px;
+      box-shadow: 0 2px 10px rgba(0,0,0,0.15);
+      z-index: 1;
+      max-width: calc(100vw - 20px);
+    }
+    #controls h3 {
+      margin: 0 0 8px 0;
+      font-size: 14px;
+      font-weight: 600;
+    }
+    #controls label {
+      font-size: 13px;
+      margin-right: 12px;
+    }
+    #controls select, #controls input[type="range"] {
+      margin-left: 6px;
+    }
+    .control-row {
+      margin-bottom: 8px;
+    }
+    .control-row:last-child {
+      margin-bottom: 0;
+    }
+    #year-value {
+      display: inline-block;
+      min-width: 40px;
+      font-weight: 600;
+    }
+    .about-toggle {
+      background: none;
+      border: none;
+      color: #666;
+      font-size: 12px;
+      cursor: pointer;
+      padding: 0;
+      text-decoration: underline;
+      display: none;
+      float: right;
+    }
+    .about-toggle:hover {
+      color: #333;
+    }
+    .about-content {
+      display: block;
+      margin-top: 10px;
+      padding-top: 10px;
+      border-top: 1px solid #ddd;
+      font-size: 12px;
+      line-height: 1.5;
+      color: #555;
+      max-width: 280px;
+    }
+    .about-content.collapsed {
+      display: none;
+    }
+    .about-content p {
+      margin: 0 0 8px 0;
+    }
+    .about-content a {
+      color: #58cc02;
+      text-decoration: none;
+    }
+    .about-content a:hover {
+      text-decoration: underline;
+    }
+    .about-links {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px 12px;
+    }
+    
+    /* Mobile responsive styles */
+    @media (max-width: 480px) {
+      #controls {
+        top: 10px;
+        left: 10px;
+        right: 10px;
+        padding: 10px 12px;
+        font-size: 12px;
+      }
+      #controls h3 {
+        font-size: 13px;
+        margin-bottom: 6px;
+      }
+      #controls label {
+        font-size: 12px;
+        margin-right: 8px;
+      }
+      .control-row {
+        margin-bottom: 6px;
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 4px;
+      }
+      #controls input[type="range"] {
+        width: 100px;
+      }
+      .about-toggle {
+        display: inline;
+      }
+      .about-content {
+        display: none;
+        max-width: 100%;
+        margin-top: 24px;
+      }
+      .about-content.expanded {
+        display: block;
+      }
+    }
+    #tooltip {
+      position: absolute;
+      background: rgba(0, 0, 0, 0.8);
+      color: #fff;
+      padding: 8px 12px;
+      border-radius: 4px;
+      font-size: 13px;
+      pointer-events: none;
+      display: none;
+      z-index: 2;
+    }
+  </style>
+</head>
+<body>
+  <div id="map"></div>
+  
+  <div id="controls">
+    <h3>Duolingo Language Study</h3>
+    <div class="control-row">
+      <label>
+        Year: <span id="year-value">2025</span>
+        <input type="range" id="year-slider" min="2020" max="2025" value="2025" step="1">
+      </label>
+    </div>
+    <div class="control-row">
+      <label>
+        <input type="radio" name="rank" value="1" checked> #1 Language
+      </label>
+      <label>
+        <input type="radio" name="rank" value="2"> #2 Language
+      </label>
+    </div>
+    <button class="about-toggle" id="about-toggle">About</button>
+    <div class="about-content" id="about-content">
+      <p>This map shows the most studied languages on Duolingo by country, based on data from the annual Duolingo Language Report (2020-2025). Made by <a href='https://x.com/anvaka' target="_blank">anvaka</a>.</p>
+      <div class="about-links">
+        <a href="https://blog.duolingo.com/2025-duolingo-language-report/" target="_blank">2025 Report</a>
+        <a href="https://docs.google.com/spreadsheets/d/1CndYC5ZovYfmPuMN9T9Jxfa4CQXOzZrfQ2kAUaWG1ZU/edit?gid=532174835" target="_blank">Dataset</a>
+        <a href="https://github.com/anvaka/duolingo-study-map" target="_blank">Source Code</a>
+        <a href="https://flagpedia.net/" target="_blank">Flags</a>
+      </div>
+    </div>
+  </div>
+
+  <div id="tooltip"></div>
+
+  <script src="https://unpkg.com/maplibre-gl@3.1.0/dist/maplibre-gl.js"></script>
+  <script type="module" src="./main.js"></script>
+  <script>
+    document.getElementById('about-toggle').addEventListener('click', function() {
+      const content = document.getElementById('about-content');
+      const isExpanded = content.classList.toggle('expanded');
+      content.classList.remove('collapsed');
+      this.textContent = isExpanded ? 'Close' : 'About';
+    });
+  </script>
+</body>
+</html>
